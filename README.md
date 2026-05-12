@@ -90,6 +90,26 @@ We install it on demand via `uvx --from git+<fork>@<branch> mcp-server-qdrant`. 
 - **Cache freshness.** Once cached, new commits pushed to `feature/openrouter-provider` are **not** picked up automatically. To force a refresh, deregister and re-register the project (`indexer remove <name>` then `indexer add ...`), or run the MCP command manually with `uvx --refresh ...`.
 - **When upstream merges OpenRouter support.** Swap the `MCP_GIT_URL`/`MCP_GIT_BRANCH` constants in [src/indexer/mcp.py](src/indexer/mcp.py) for the PyPI package: `uvx mcp-server-qdrant`. No other changes needed.
 
+### Schema contract between cocoindex and mcp-server-qdrant
+
+This was the source of two real bugs we hit during the first end-to-end test on May 2026. Documenting it so future-you doesn't re-discover them.
+
+**1. Named vector field.** `mcp-server-qdrant` queries Qdrant under a vector name derived from the embedding model (e.g. `openrouter-qwen-qwen3-embedding-8b`). CocoIndex writes the vector under whatever name we pass to `VectorIndexDef(field_name=...)`. We standardized on `embedding` in [src/indexer/flow.py](src/indexer/flow.py) and force the MCP server to query that name via the env var `QDRANT_VECTOR_NAME=embedding`, passed during `claude mcp add` in [src/indexer/mcp.py](src/indexer/mcp.py).
+
+> The `QDRANT_VECTOR_NAME` override **must be present in the fork**'s `OpenRouterEmbeddingProvider.get_vector_name()`. The upstream branch had to be patched and pushed — if a future re-clone of the fork is missing it, qdrant-find errors with `Not existing vector name error`.
+
+**2. Payload text field.** `mcp-server-qdrant`'s `qdrant-find` reads `result.payload["document"]` (hardcoded). CocoIndex used to write the chunk text only under `codeChunk`. Now [flow.py](src/indexer/flow.py) writes both fields. For collections indexed **before** this change, run the one-shot migration:
+
+```bash
+uv run python scripts/migrate_codechunk_to_document.py <collection-name>
+```
+
+It scrolls the collection in batches of 256 and copies `codeChunk` → `document` in-place. Idempotent (skips points that already have `document`). No re-embedding — saves the OpenRouter cost.
+
+### Restarting Claude Code after MCP changes
+
+Env vars passed via `claude mcp add -e ...` are baked into Claude Code's config and only consumed when a **new** MCP server process is spawned. After `indexer add`, `indexer update`, or any change to the env vars: existing Claude Code sessions keep talking to their old MCP process. You must close and reopen Claude Code (or at least restart that one session) for changes to take effect.
+
 ## Interrupting and resuming
 
 Indexing is incremental — CocoIndex commits state to Postgres after each processed file. **Ctrl-C is safe**: files already indexed stay indexed. To resume an interrupted `indexer add` run:
@@ -105,4 +125,6 @@ The project is recorded in the local registry as soon as `cocoindex setup` succe
 - **`Qdrant collection '<name>-codebase' already exists`** — the collection survived from a previous run (or another tool created it). Re-run with `--reset` to drop and recreate it: `indexer add /path --name <name> --reset`. Destructive — all vectors in that collection are lost.
 - **`cocoindex setup failed`** — check Docker is running: `docker compose ps`.
 - **MCP server not visible in Claude Code** — `claude mcp list` to confirm; restart Claude Code if needed.
+- **`qdrant-find` returns `Not existing vector name error: openrouter-…`** — the MCP server is querying under the model-derived vector name instead of `embedding`. Either (a) the fork branch on GitHub is missing the `QDRANT_VECTOR_NAME` override patch, or (b) Claude Code wasn't restarted after the MCP registration. See *Schema contract* above.
+- **`qdrant-find` returns `'document'` (KeyError)** — the collection was indexed before flow.py started writing the `document` payload field. Run `uv run python scripts/migrate_codechunk_to_document.py <collection-name>` to backfill.
 - **Want to start fresh** — `indexer remove <name>`, then `docker compose down -v` to wipe Qdrant and Postgres volumes.

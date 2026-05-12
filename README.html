@@ -125,6 +125,8 @@ footer strong{color:white;letter-spacing:.18em}
     <a href="#config">Config</a>
     <a href="#how">How it works</a>
     <a href="#mcp-fork">MCP fork</a>
+    <a href="#schema">Schema contract</a>
+    <a href="#restart">Restart MCP</a>
     <a href="#resume">Interrupt &amp; resume</a>
     <a href="#trouble">Troubleshooting</a>
   </div>
@@ -235,6 +237,32 @@ indexer status                  <span class="cmt"># check Qdrant + Postgres reac
   </div>
 </section>
 
+<section id="schema">
+  <div class="sh"><div class="sh-bar"></div><div><div class="sh-l">contract</div><h2 class="sh-t">Schema Contract</h2></div></div>
+  <p>Two real bugs surfaced during the first end-to-end test on May 2026. Documented here so future-you doesn't re-discover them.</p>
+
+  <div class="card">
+    <div class="callout-t">1 — Named vector field</div>
+    <p><code>mcp-server-qdrant</code> queries Qdrant under a vector name derived from the embedding model (e.g. <code>openrouter-qwen-qwen3-embedding-8b</code>). CocoIndex writes the vector under whatever name we pass to <code>VectorIndexDef(field_name=...)</code>. We standardized on <code>embedding</code> in <a href="src/indexer/flow.py"><code>flow.py</code></a> and force the MCP server to query that name via the env var <code>QDRANT_VECTOR_NAME=embedding</code>, passed during <code>claude mcp add</code> in <a href="src/indexer/mcp.py"><code>mcp.py</code></a>.</p>
+  </div>
+
+  <div class="callout co-red">
+    <p>The <code>QDRANT_VECTOR_NAME</code> override <strong>must be present in the fork's</strong> <code>OpenRouterEmbeddingProvider.get_vector_name()</code>. The upstream branch had to be patched and pushed — if a future re-clone of the fork is missing it, <code>qdrant-find</code> errors with <code>Not existing vector name error</code>.</p>
+  </div>
+
+  <div class="card">
+    <div class="callout-t">2 — Payload text field</div>
+    <p><code>mcp-server-qdrant</code>'s <code>qdrant-find</code> reads <code>result.payload["document"]</code> (hardcoded). CocoIndex used to write the chunk text only under <code>codeChunk</code>. Now <a href="src/indexer/flow.py"><code>flow.py</code></a> writes both fields. For collections indexed <strong>before</strong> this change, run the one-shot migration:</p>
+<pre><code>uv run python scripts/migrate_codechunk_to_document.py &lt;collection-name&gt;</code></pre>
+    <p>Scrolls the collection in batches of 256 and copies <code>codeChunk</code> → <code>document</code> in-place. Idempotent (skips points that already have <code>document</code>). <strong>No re-embedding</strong> — saves the OpenRouter cost.</p>
+  </div>
+</section>
+
+<section id="restart">
+  <div class="sh"><div class="sh-bar"></div><div><div class="sh-l">gotcha</div><h2 class="sh-t">Restarting Claude Code after MCP Changes</h2></div></div>
+  <p>Env vars passed via <code>claude mcp add -e ...</code> are baked into Claude Code's config and only consumed when a <strong>new</strong> MCP server process is spawned. After <code>indexer add</code>, <code>indexer update</code>, or any change to the env vars: existing Claude Code sessions keep talking to their old MCP process. You must <strong>close and reopen Claude Code</strong> (or at least restart that one session) for changes to take effect.</p>
+</section>
+
 <section id="resume">
   <div class="sh"><div class="sh-bar"></div><div><div class="sh-l">recovery</div><h2 class="sh-t">Interrupting and Resuming</h2></div></div>
   <p>Indexing is incremental — CocoIndex commits state to Postgres after each processed file. <strong>Ctrl-C is safe</strong>: files already indexed stay indexed. To resume an interrupted <code>indexer add</code> run:</p>
@@ -260,6 +288,17 @@ indexer status                  <span class="cmt"># check Qdrant + Postgres reac
   <div class="card">
     <div class="callout-t">MCP server not visible in Claude Code</div>
     <p>Run <code>claude mcp list</code> to confirm registration; restart Claude Code if needed.</p>
+  </div>
+
+  <div class="card">
+    <div class="callout-t"><code>qdrant-find</code>: <code>Not existing vector name error: openrouter-…</code></div>
+    <p>The MCP server is querying under the model-derived vector name instead of <code>embedding</code>. Either (a) the fork branch on GitHub is missing the <code>QDRANT_VECTOR_NAME</code> override patch, or (b) Claude Code wasn't restarted after the MCP registration. See <a href="#schema">Schema Contract</a> above.</p>
+  </div>
+
+  <div class="card">
+    <div class="callout-t"><code>qdrant-find</code>: <code>'document'</code> (KeyError)</div>
+    <p>The collection was indexed before <code>flow.py</code> started writing the <code>document</code> payload field. Backfill with:</p>
+<pre style="margin-top:8px;margin-bottom:0"><code>uv run python scripts/migrate_codechunk_to_document.py &lt;collection-name&gt;</code></pre>
   </div>
 
   <div class="card">

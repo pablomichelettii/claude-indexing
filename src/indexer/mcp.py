@@ -63,6 +63,11 @@ def add(
         "-e", "EMBEDDING_PROVIDER=openrouter",
         "-e", f"EMBEDDING_MODEL={embedding_model}",
         "-e", f"OPENROUTER_API_KEY={openrouter_api_key}",
+        # Force the server to query the vector named "embedding" — the field
+        # cocoindex writes to. Without this, the fork derives a name from the
+        # model (e.g. "openrouter-qwen-qwen3-embedding-8b") and qdrant-find
+        # fails with "Not existing vector name error".
+        "-e", "QDRANT_VECTOR_NAME=embedding",
         "--",
         "uvx", "--from", MCP_PKG_SPEC, "mcp-server-qdrant",
     ]

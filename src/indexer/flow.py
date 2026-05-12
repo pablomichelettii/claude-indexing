@@ -28,6 +28,11 @@ EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", defaults.EMBEDDING_MODEL)
 EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", str(defaults.EMBEDDING_DIM)))
 QDRANT_GRPC_URL = os.environ.get("QDRANT_GRPC_URL", defaults.QDRANT_GRPC_URL)
 
+# Name of the Qdrant named-vector under which embeddings are stored.
+# The mcp-server-qdrant fork reads its `QDRANT_VECTOR_NAME` env var to query
+# under this same name (see mcp.py — we pass it during registration).
+VECTOR_FIELD = "embedding"
+
 
 INCLUDED_PATTERNS = [
     "**/*.py",
@@ -124,12 +129,16 @@ def code_index_flow(flow_builder: cocoindex.FlowBuilder, data_scope: cocoindex.D
             code_embeddings.collect(
                 id=cocoindex.GeneratedField.UUID,
                 filePath=file["filename"],
+                # `document` is the payload field mcp-server-qdrant reads in
+                # qdrant-find. `codeChunk` kept as alias for any non-MCP query.
+                document=chunk["text"],
                 codeChunk=chunk["text"],
                 startLine=chunk["start"]["line"],
                 endLine=chunk["end"]["line"],
                 segmentHash=chunk["segment_hash"],
                 pathSegments=chunk["path_segments"],
-                embedding=chunk["embedding"],
+                # Vector field name must match what mcp-server-qdrant queries for.
+                **{VECTOR_FIELD: chunk["embedding"]},
             )
 
     code_embeddings.export(
@@ -141,7 +150,7 @@ def code_index_flow(flow_builder: cocoindex.FlowBuilder, data_scope: cocoindex.D
         primary_key_fields=["id"],
         vector_indexes=[
             cocoindex.VectorIndexDef(
-                field_name="embedding",
+                field_name=VECTOR_FIELD,
                 metric=cocoindex.VectorSimilarityMetric.COSINE_SIMILARITY,
             )
         ],

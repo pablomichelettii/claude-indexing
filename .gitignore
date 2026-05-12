@@ -7,3 +7,8 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+
+# Local clones of the MCP server fork — we install it via `uvx --from git+...`,
+# never from a local path. Keeps stray .git directories out of the repo index.
+mcp-server-qdrant/
+mcp-fork/
