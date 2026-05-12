@@ -24,8 +24,12 @@ uv sync          # or: pip install -e .
 ## First run
 
 ```bash
-indexer bootstrap     # starts Qdrant + Postgres in Docker
+uv run indexer bootstrap     # starts Qdrant + Postgres in Docker
+uv tool install .            # installs `indexer` globally — run from any directory afterward
+indexer link-env .env        # symlink ~/.config/claude-indexer/.env → your project .env
 ```
+
+`uv tool install` copies the package into an isolated environment, so the tool no longer has access to the `.env` file in the project directory. `link-env` creates a symlink at `~/.config/claude-indexer/.env` pointing to the file you specify — from that point on every `indexer` invocation picks it up regardless of where it is run. Run this once after installing; re-run with `--force` if you ever move or replace your `.env`.
 
 ## Index a codebase
 
@@ -36,27 +40,40 @@ indexer add ~/Code/myproject
 # → registers an MCP server named "myproject" with Claude Code (user scope)
 ```
 
-**Flags for recovering from a dirty state:**
-
-- `--reset` — drop a stray Qdrant collection with the same name before setup. Use this when the project is **new to the CLI** but a leftover collection exists in Qdrant (e.g. from a previous manual setup).
-- `--force` — if a project with this name is already in the CLI registry, wipe it completely (cocoindex state, Qdrant collection, MCP registration, local config) and start fresh. Destructive.
-
-```bash
-indexer add ~/Code/myproject --reset    # leftover Qdrant collection? clear it.
-indexer add ~/Code/myproject --force    # already registered? blow it away and re-add.
-```
-
 Then **restart Claude Code** so it picks up the new MCP server. From any session you can now ask it to search the codebase semantically — it will call `qdrant-find` against the `myproject` collection.
 
-## Day-to-day
+## Commands reference
 
-```bash
-indexer list                    # show registered projects
-indexer update myproject        # incremental re-index
-indexer live myproject          # watch mode, re-indexes on file change
-indexer remove myproject        # drop collection + MCP registration
-indexer status                  # check Qdrant + Postgres reachability + list projects
-```
+### Infrastructure
+
+| Command | Description |
+|---|---|
+| `indexer bootstrap` | Start Docker services (Qdrant + Postgres) and prepare the CocoIndex state DB. Run once after cloning. |
+| `indexer status` | Health check: Docker, Qdrant, Postgres reachability, and list of registered projects. |
+| `indexer service_stop` | Stop Docker services (containers remain, volumes intact). |
+| `indexer service_remove` | Stop and remove Docker services **and** volumes — full purge of all Qdrant index and Postgres state. |
+| `indexer service_update` | `git pull` + `docker compose build` + `up` — upgrades the running stack in place. |
+
+### Project management
+
+| Command | Description |
+|---|---|
+| `indexer add <path> [--name <name>]` | Index a codebase, create a Qdrant collection, and register an MCP server with Claude Code. `--name` overrides the collection/server name (default: directory basename). |
+| `indexer update <name>` | Incremental re-index of a registered project (picks up changed files only). Also resumes an interrupted `add`. |
+| `indexer live <name>` | Watch mode — re-indexes on file change. |
+| `indexer list` | Show all registered projects (name, path, collection, timestamp). |
+| `indexer remove <name>` | Drop the Qdrant collection and remove the MCP server registration. |
+
+**Recovery flags for `add`:**
+- `--reset` — drop a stray Qdrant collection with the same name before setup. Use when the project is **new to the CLI** but a leftover collection exists in Qdrant.
+- `--force` — if the project is already registered, wipe everything (cocoindex state, Qdrant collection, MCP registration, local config) and start fresh. Destructive.
+
+### Configuration
+
+| Command | Description |
+|---|---|
+| `indexer create_config` | Create a base `.indexerconf` in the current directory for per-project overrides. |
+| `indexer link-env <path>` | Symlink `~/.config/claude-indexer/.env` → the `.env` file at `<path>`. Run once after `uv tool install` so every `indexer` invocation finds the secrets regardless of working directory. Re-run with `--force` if you move or replace your `.env`. |
 
 You can have N projects registered simultaneously. Each gets its own Qdrant collection and its own MCP server name in Claude Code.
 
@@ -68,7 +85,7 @@ You can have N projects registered simultaneously. Each gets its own Qdrant coll
 
 ### A note on the OpenRouter API key
 
-When `indexer add` registers the MCP server with Claude Code, the key is passed via `-e OPENROUTER_API_KEY=...` to `claude mcp add`. Claude Code then stores it in its own config (`~/.claude/mcp.json` or the equivalent for the chosen scope) so the MCP server can read it on startup. The key is **visible in plaintext** there and in the output of `claude mcp list`. Acceptable for a personal dev tool; if you need stricter isolation, run the indexer as a different OS user.
+When `uv runindexer add` registers the MCP server with Claude Code, the key is passed via `-e OPENROUTER_API_KEY=...` to `claude mcp add`. Claude Code then stores it in its own config (`~/.claude/mcp.json` or the equivalent for the chosen scope) so the MCP server can read it on startup. The key is **visible in plaintext** there and in the output of `claude mcp list`. Acceptable for a personal dev tool; if you need stricter isolation, run the indexer as a different OS user.
 
 ## How it works
 
