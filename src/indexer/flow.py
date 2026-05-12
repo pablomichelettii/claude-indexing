@@ -37,8 +37,6 @@ VECTOR_FIELD = "embedding"
 INCLUDED_PATTERNS = [
     # Programming languages
     "**/*.py",
-    "**/*.ts", "**/*.tsx",
-    "**/*.js", "**/*.jsx",
     "**/*.go",
     "**/*.rs",
     "**/*.java",
@@ -49,11 +47,19 @@ INCLUDED_PATTERNS = [
     "**/*.swift",
     "**/*.kt",
     "**/*.php",
+    "**/*.sh",
+    "**/*.yml", "**/*.yaml",
+    # Generic Frontend Application
+    "**/*.ts", "**/*.tsx",
+    "**/*.js", "**/*.jsx",
     "**/*.vue",
     "**/*.svelte",
-    # Java enterprise UI and config
+    "**/*.html", "**/*.xhtml",
+    "**/*.css", "**/*.scss", "**/*.less", "**/*.sass",
+    # Java enterprise UI and config / Wildfly Environment
     "**/*.jsp",
     "**/*.xml",
+    "**/*.ftlx", "**/*.ftl", "**/*.drl"
     "**/*.xsd",
     "**/*.wsdl",
     "**/*.properties",

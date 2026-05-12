@@ -3,11 +3,16 @@
 Subcommands:
   bootstrap                  start Docker services, prepare cocoindex state DB
   add <path> [--name]        index a codebase + register MCP server
+  create_config              create a base .indexerconf in the current directory
   list                       show registered projects
   update <name>              re-index a project (incremental)
   live <name>                watch mode (reindex on file change)
   remove <name>              drop collection + MCP registration
   status                     health check (Docker, Qdrant, Postgres)
+  service_stop               stop Docker services
+  service_remove             stop and remove Docker services + volumes (full purge)
+  service_update             git pull + docker compose build + up (upgrade in place)
+  link-env <path>            symlink ~/.config/claude-indexer/.env → your .env
 """
 
 from __future__ import annotations
@@ -27,21 +32,29 @@ from dotenv import load_dotenv
 from . import config, defaults, mcp
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-FLOW_FILE = REPO_ROOT / "src" / "indexer" / "flow.py"
-DOTENV = REPO_ROOT / ".env"
+_PKG_DIR = Path(__file__).resolve().parent
+FLOW_FILE = _PKG_DIR / "flow.py"
+COMPOSE_FILE = _PKG_DIR / "docker-compose.yml"
+_CONFIG_DIR = Path.home() / ".config" / "claude-indexer"
+_USER_DOTENV = _CONFIG_DIR / ".env"
+# Prefer the user-config .env (stable across installs); fall back to package dir for dev mode.
+DOTENV = _USER_DOTENV if _USER_DOTENV.exists() else _PKG_DIR.parents[1] / ".env"
 
 
 # ─── helpers ──────────────────────────────────────────────────────────────
 
 def _load_env() -> None:
-    if DOTENV.exists():
-        load_dotenv(DOTENV)
+    dotenv = _USER_DOTENV if _USER_DOTENV.exists() else _PKG_DIR.parents[1] / ".env"
+    if dotenv.exists():
+        load_dotenv(dotenv)
     else:
-        sys.exit(f"missing {DOTENV} — copy .env.example and fill in OPENROUTER_API_KEY")
+        sys.exit(
+            f"No .env found. Run:  indexer link-env /path/to/your/.env\n"
+            f"  or create {_USER_DOTENV} directly."
+        )
     for var in ("OPENROUTER_API_KEY", "COCOINDEX_DATABASE_URL"):
         if not os.environ.get(var):
-            sys.exit(f"{var} not set in {DOTENV}")
+            sys.exit(f"{var} not set — check {dotenv}")
 
 
 def _slugify(name: str) -> str:
@@ -56,12 +69,33 @@ def _flow_name(project_name: str) -> str:
     return "CodeIndex_" + project_name.replace("-", "_")
 
 
+def _cocoindex_bin() -> str:
+    # When installed via uv tool, cocoindex lives in the same isolated venv.
+    candidate = Path(sys.executable).parent / "cocoindex"
+    return str(candidate) if candidate.exists() else "cocoindex"
+
+
 def _run_cocoindex(args: list[str], project: dict, flow_name: str) -> int:
     env = os.environ.copy()
     env["INDEXER_FLOW_NAME"] = flow_name
     env["INDEXER_PATH"] = project["path"]
     env["INDEXER_COLLECTION"] = project["collection"]
-    return subprocess.call(["cocoindex", *args, str(FLOW_FILE)], env=env)
+    return subprocess.call([_cocoindex_bin(), *args, str(FLOW_FILE)], env=env)
+
+
+def _load_indexerconf(project_path: Path) -> dict:
+    conf_file = project_path / ".indexerconf"
+    if not conf_file.exists():
+        return {}
+    result = {}
+    for line in conf_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" in line:
+            key, _, value = line.partition(":")
+            result[key.strip()] = value.strip()
+    return result
 
 
 def _http_ok(url: str, timeout: float = 2.0) -> bool:
@@ -87,21 +121,35 @@ def _qdrant_drop_collection(qdrant_url: str, collection: str) -> None:
             raise
 
 
-def _docker_compose_up() -> None:
-    subprocess.run(
-        ["docker", "compose", "up", "-d"],
-        cwd=REPO_ROOT,
-        check=True,
+def _find_source_repo() -> Path | None:
+    """Walk up from the resolved .env symlink to find the git root."""
+    if not _USER_DOTENV.is_symlink():
+        return None
+    candidate = _USER_DOTENV.resolve().parent
+    while candidate != candidate.parent:
+        if (candidate / ".git").exists():
+            return candidate
+        candidate = candidate.parent
+    return None
+
+
+def _docker_compose(*args: str, **kwargs) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["docker", "compose", "-f", str(COMPOSE_FILE), *args],
+        **kwargs,
     )
 
 
+def _docker_compose_up() -> None:
+    _docker_compose("up", "-d", check=True)
+
+
 def _postgres_ready() -> bool:
-    return subprocess.call(
-        ["docker", "compose", "exec", "-T", "postgres", "pg_isready", "-U", "cocoindex"],
-        cwd=REPO_ROOT,
+    return _docker_compose(
+        "exec", "-T", "postgres", "pg_isready", "-U", "cocoindex",
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-    ) == 0
+    ).returncode == 0
 
 
 # ─── commands ─────────────────────────────────────────────────────────────
@@ -138,8 +186,11 @@ def cmd_add(args: argparse.Namespace) -> int:
     if not path.is_dir():
         sys.exit(f"not a directory: {path}")
 
-    name = args.name or _slugify(path.name)
-    collection = f"{name}-codebase"
+    indexerconf = _load_indexerconf(path)
+    if indexerconf:
+        print(f"→ loaded .indexerconf from {path}")
+    name = args.name or indexerconf.get("name") or _slugify(path.name)
+    collection = indexerconf.get("collection") or f"{name}-codebase"
     project = {"path": str(path), "collection": collection}
     flow_name = _flow_name(name)
     qdrant_url = os.environ.get("QDRANT_URL", defaults.QDRANT_URL)
@@ -213,18 +264,28 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 def cmd_update(args: argparse.Namespace) -> int:
     _load_env()
-    project = config.get_project(args.name)
+    name = args.name
+    if name is None:
+        indexerconf = _load_indexerconf(Path.cwd())
+        name = indexerconf.get("name") or _slugify(Path.cwd().name)
+        print(f"→ loaded .indexerconf from {Path.cwd()}")
+    project = config.get_project(name)
     if not project:
-        sys.exit(f"unknown project: {args.name}")
-    flow_name = _flow_name(args.name)
+        sys.exit(f"unknown project: {name}")
+    indexerconf = _load_indexerconf(Path(project["path"]))
+    if indexerconf:
+        print(f"→ loaded .indexerconf from {project['path']}")
+        if "collection" in indexerconf:
+            project = {**project, "collection": indexerconf["collection"]}
+    flow_name = _flow_name(name)
     rc = _run_cocoindex(["update"], project, flow_name)
     if rc != 0:
         return rc
     # Ensure MCP is registered (recovers from an interrupted `indexer add`).
     # Use the scope stored at add-time so we don't silently downgrade it.
-    print(f"→ ensuring MCP server '{args.name}' is registered…")
+    print(f"→ ensuring MCP server '{name}' is registered…")
     mcp.add(
-        args.name,
+        name,
         collection=project["collection"],
         openrouter_api_key=os.environ["OPENROUTER_API_KEY"],
         embedding_model=os.environ.get("EMBEDDING_MODEL", defaults.EMBEDDING_MODEL),
@@ -268,17 +329,77 @@ def cmd_remove(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_service_stop(args: argparse.Namespace) -> int:
+    print("→ stopping Docker services…")
+    _docker_compose("stop", check=True)
+    print("✓ services stopped.")
+    return 0
+
+
+def cmd_service_remove(args: argparse.Namespace) -> int:
+    print("→ stopping and removing Docker services + volumes (full purge)…")
+    _docker_compose("down", "--volumes", "--remove-orphans", check=True)
+    print("✓ services and volumes removed.")
+    return 0
+
+
+def cmd_service_update(args: argparse.Namespace) -> int:
+    source_repo = _find_source_repo()
+    if source_repo is None:
+        sys.exit(
+            "Cannot find source repo — ensure ~/.config/claude-indexer/.env "
+            "is a symlink created by `indexer link-env /path/to/repo/.env`."
+        )
+
+    print(f"→ pulling latest changes in {source_repo}…")
+    subprocess.run(["git", "pull"], cwd=source_repo, check=True)
+
+    print("→ reinstalling indexer tool…")
+    subprocess.run(["uv", "tool", "install", str(source_repo), "--reinstall"], check=True)
+
+    return cmd_bootstrap(args)
+
+
+def cmd_create_config(args: argparse.Namespace) -> int:
+    cwd = Path.cwd()
+    conf_file = cwd / ".indexerconf"
+    if conf_file.exists() and not args.force:
+        sys.exit(f".indexerconf already exists in {cwd}. Use --force to overwrite.")
+    name = _slugify(cwd.name)
+    conf_file.write_text(
+        f"# indexer configuration for this project\n"
+        f"# place this file in the root of your codebase\n"
+        f"\n"
+        f"# project name used for MCP server registration (default: dir basename slug)\n"
+        f"name: {name}\n"
+        f"\n"
+        f"# Qdrant collection name (default: <name>-codebase)\n"
+        f"collection: {name}-codebase\n"
+    )
+    print(f"✓ created {conf_file}")
+    return 0
+
+
+def cmd_link_env(args: argparse.Namespace) -> int:
+    src = Path(args.path).expanduser().resolve()
+    if not src.exists():
+        sys.exit(f"not found: {src}")
+    _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if _USER_DOTENV.exists() or _USER_DOTENV.is_symlink():
+        if not args.force:
+            sys.exit(f"{_USER_DOTENV} already exists. Use --force to replace it.")
+        _USER_DOTENV.unlink()
+    _USER_DOTENV.symlink_to(src)
+    print(f"✓ {_USER_DOTENV} -> {src}")
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     _load_env()
     qdrant_url = os.environ.get("QDRANT_URL", defaults.QDRANT_URL)
     print(f"Qdrant ({qdrant_url}): {'✓' if _http_ok(qdrant_url) else '✗'}")
 
-    pg_ok = subprocess.call(
-        ["docker", "compose", "exec", "-T", "postgres", "pg_isready", "-U", "cocoindex"],
-        cwd=REPO_ROOT,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    ) == 0
+    pg_ok = _postgres_ready()
     print(f"Postgres: {'✓' if pg_ok else '✗'}")
 
     print(f"\nProjects ({len(config.list_projects())}):")
@@ -309,10 +430,15 @@ def main() -> int:
                         "but a leftover collection exists in Qdrant)")
     a.set_defaults(func=cmd_add)
 
+    cc = sub.add_parser("create_config", help="create a base .indexerconf in the current directory")
+    cc.add_argument("--force", action="store_true", help="overwrite existing .indexerconf")
+    cc.set_defaults(func=cmd_create_config)
+
     sub.add_parser("list", help="list projects").set_defaults(func=cmd_list)
 
     u = sub.add_parser("update", help="re-index a project")
-    u.add_argument("name")
+    u.add_argument("name", nargs="?", default=None,
+                   help="project name (default: read from .indexerconf in cwd)")
     u.set_defaults(func=cmd_update)
 
     lv = sub.add_parser("live", help="watch mode")
@@ -324,6 +450,15 @@ def main() -> int:
     r.set_defaults(func=cmd_remove)
 
     sub.add_parser("status", help="health check").set_defaults(func=cmd_status)
+
+    sub.add_parser("service_stop", help="stop Docker services").set_defaults(func=cmd_service_stop)
+    sub.add_parser("service_remove", help="stop + remove Docker services and volumes").set_defaults(func=cmd_service_remove)
+    sub.add_parser("service_update", help="git pull + rebuild + restart services").set_defaults(func=cmd_service_update)
+
+    le = sub.add_parser("link-env", help="symlink a .env file into ~/.config/claude-indexer/.env")
+    le.add_argument("path", help="path to your .env file")
+    le.add_argument("--force", action="store_true", help="overwrite existing symlink/file")
+    le.set_defaults(func=cmd_link_env)
 
     args = p.parse_args()
     return args.func(args)
