@@ -49,6 +49,7 @@ INCLUDED_PATTERNS = [
     "**/*.php",
     "**/*.sh",
     "**/*.yml", "**/*.yaml",
+    "**/*.json",
     # Generic Frontend Application
     "**/*.ts", "**/*.tsx",
     "**/*.js", "**/*.jsx",
@@ -59,21 +60,13 @@ INCLUDED_PATTERNS = [
     # Java enterprise UI and config / Wildfly Environment
     "**/*.jsp",
     "**/*.xml",
-    "**/*.ftlx", "**/*.ftl", "**/*.drl"
+    "**/*.ftlx", "**/*.ftl", "**/*.drl",
     "**/*.xsd",
     "**/*.wsdl",
     "**/*.properties",
     # Docs and queries
     "**/*.md",
     "**/*.sql",
-    # Web (UI templates + source CSS)
-    "**/*.html",
-    "**/*.scss",
-    "**/*.less",
-    # Ops / config
-    "**/*.sh",
-    "**/*.yml", "**/*.yaml",
-    "**/*.json",
 ]
 
 EXCLUDED_PATTERNS = [
