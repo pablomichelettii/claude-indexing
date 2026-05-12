@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>claude-indexer — Semantic Code Search for Claude Code</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=KoHo:wght@300;400;500;600;700&family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --p1:#5B9269;--p2:#8AB195;--p3:#A4C6AB;
+  --s1:#EBB356;--s2:#FFD28A;
+  --nd:#444;--nm:#666;--nl:#F2F2F2;
+  --grad:linear-gradient(135deg,#5B9269,#EBB356);
+  --f:'Poppins',sans-serif;--fk:'KoHo',sans-serif;
+}
+html{scroll-behavior:smooth}
+body{font-family:var(--f);color:var(--nd);background:#fafaf8;background-image:radial-gradient(ellipse 60% 50% at 92% 8%,rgba(164,198,171,.1) 0%,transparent 100%),radial-gradient(ellipse 50% 40% at 5% 95%,rgba(235,179,86,.06) 0%,transparent 100%);background-attachment:fixed;line-height:1.55}
+a{color:var(--p1);text-decoration:none;border-bottom:1px solid rgba(91,146,105,.3);transition:all .15s}
+a:hover{color:#3d6344;border-bottom-color:var(--p1)}
+code{font-family:'Courier New',monospace;background:rgba(91,146,105,.1);padding:1px 6px;border-radius:3px;font-size:.9em;color:#2d6e45}
+strong{color:var(--nd);font-weight:600}
+em{color:var(--nm)}
+
+/* HERO */
+.hero{background:linear-gradient(145deg,#2e5238 0%,#4a7d5a 30%,#5B9269 55%,#c99540 85%,#EBB356 100%);padding:80px 9% 70px;position:relative;overflow:hidden}
+.hero::before{content:'';position:absolute;top:-15%;right:-8%;width:50vw;height:50vw;border-radius:50%;background:rgba(255,255,255,.045);pointer-events:none}
+.hero::after{content:'';position:absolute;bottom:-25%;left:-4%;width:35vw;height:35vw;border-radius:50%;background:rgba(0,0,0,.07);pointer-events:none}
+.hero-bg{position:absolute;right:4%;bottom:-30px;font-family:var(--fk);font-size:clamp(140px,22vw,300px);font-weight:700;color:rgba(255,255,255,.06);line-height:1;pointer-events:none;user-select:none}
+.hero-i{position:relative;z-index:1;max-width:980px;margin:0 auto}
+.hero-ey{font-family:var(--fk);font-size:clamp(10px,1vw,13px);font-weight:500;color:rgba(255,255,255,.5);letter-spacing:.28em;text-transform:uppercase;margin-bottom:14px}
+.hero-h1{font-family:var(--fk);font-size:clamp(40px,5.8vw,72px);font-weight:700;color:white;line-height:1.06;margin-bottom:18px}
+.hero-s{font-family:var(--fk);font-size:clamp(15px,1.6vw,22px);font-weight:300;color:rgba(255,255,255,.85);line-height:1.4;max-width:720px;margin-bottom:24px}
+.hero-pill{display:inline-block;font-family:var(--fk);font-size:11px;font-weight:600;color:rgba(255,255,255,.9);background:rgba(255,255,255,.15);padding:5px 12px;border-radius:100px;letter-spacing:.08em;border:1px solid rgba(255,255,255,.2)}
+
+/* TOC */
+.toc{max-width:980px;margin:-30px auto 0;padding:0 9%;position:relative;z-index:2}
+.toc-i{background:white;border-radius:10px;padding:20px 26px;box-shadow:0 8px 24px rgba(0,0,0,.08),0 0 0 1px rgba(91,146,105,.08);display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center}
+.toc-l{font-family:var(--fk);font-size:11px;font-weight:700;color:var(--s1);letter-spacing:.18em;text-transform:uppercase;margin-right:10px}
+.toc-i a{font-size:13px;border-bottom:none;color:var(--nm);font-weight:500}
+.toc-i a:hover{color:var(--p1)}
+
+/* CONTENT */
+main{max-width:980px;margin:0 auto;padding:60px 9% 80px}
+section{margin-bottom:56px;scroll-margin-top:20px}
+.sh{display:flex;align-items:stretch;gap:14px;margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid rgba(91,146,105,.13)}
+.sh-bar{width:4px;flex-shrink:0;background:var(--grad);border-radius:2px}
+.sh-l{font-family:var(--fk);font-size:11px;font-weight:700;color:var(--s1);letter-spacing:.22em;text-transform:uppercase;margin-bottom:4px}
+.sh-t{font-family:var(--fk);font-size:clamp(22px,2.8vw,32px);font-weight:700;color:var(--nd);line-height:1.15}
+p{margin-bottom:14px;font-size:15px}
+ul:not(.blist):not(.toc-i){margin:0 0 18px 22px}
+ul:not(.blist):not(.toc-i) li{margin-bottom:8px;font-size:14.5px;line-height:1.6}
+ul:not(.blist):not(.toc-i) li::marker{color:var(--p1)}
+
+/* CODE */
+pre{background:#1a2a1a;border-radius:7px;padding:16px 20px;font-family:'Courier New',monospace;font-size:13.5px;color:#a4c6ab;line-height:1.7;border-left:3px solid var(--p2);overflow-x:auto;margin-bottom:18px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+pre code{background:none;padding:0;color:inherit;font-size:inherit}
+pre .cmt{color:#6a8a72;font-style:italic}
+pre .arr{color:var(--s1)}
+
+/* CARDS */
+.card{background:white;border-radius:8px;padding:18px 22px;box-shadow:0 1px 6px rgba(0,0,0,.055),0 0 0 1px rgba(91,146,105,.07);border-top:3px solid var(--p1);margin-bottom:14px}
+.card-gold{border-top-color:var(--s1)}
+
+/* CALLOUTS */
+.callout{padding:14px 18px;border-radius:7px;border-left:4px solid;margin-bottom:18px}
+.co-gold{background:rgba(235,179,86,.1);border-color:var(--s1)}
+.co-red{background:rgba(229,62,62,.08);border-color:#E53E3E}
+.co-green{background:rgba(91,146,105,.08);border-color:var(--p1)}
+.callout-t{font-family:var(--fk);font-weight:700;font-size:13px;letter-spacing:.04em;margin-bottom:6px;color:var(--nd)}
+.callout p:last-child{margin-bottom:0}
+
+/* TABLE */
+.tw{overflow-x:auto;margin-bottom:18px;border-radius:7px;box-shadow:0 1px 8px rgba(0,0,0,.07)}
+table{width:100%;border-collapse:collapse;background:white}
+th{background:var(--p1);color:white;padding:10px 14px;text-align:left;font-family:var(--fk);font-weight:600;font-size:12px;letter-spacing:.04em}
+td{padding:10px 14px;color:var(--nd);border-bottom:1px solid rgba(91,146,105,.1);font-size:13.5px;vertical-align:top}
+tr:nth-child(even) td{background:rgba(164,198,171,.07)}
+tr:last-child td{border-bottom:none}
+td code{font-size:12px}
+
+/* BULLET LIST */
+.blist{list-style:none;display:flex;flex-direction:column;gap:10px;margin-bottom:18px}
+.blist li{display:flex;align-items:flex-start;gap:11px;font-size:14.5px;color:var(--nd);line-height:1.55}
+.blist li::before{content:'';width:7px;height:7px;flex-shrink:0;border-radius:50%;background:var(--grad);margin-top:7px}
+.blist li strong{display:inline-block;min-width:0}
+
+/* SUBSECTION */
+h3{font-family:var(--fk);font-size:18px;font-weight:700;color:var(--nd);margin:24px 0 12px;letter-spacing:.01em}
+
+/* FOOTER */
+footer{background:linear-gradient(145deg,#1f3d2b 0%,#2e5238 50%,#3d6344 100%);color:rgba(255,255,255,.7);padding:36px 9%;text-align:center;font-family:var(--fk);font-size:12px;letter-spacing:.12em;text-transform:uppercase}
+footer strong{color:white;letter-spacing:.18em}
+
+@media (max-width:700px){
+  .hero{padding:60px 7% 50px}
+  main{padding:40px 7% 60px}
+  .toc{margin-top:-20px;padding:0 7%}
+  .toc-i{padding:16px 18px;gap:8px 16px}
+}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-bg">indexer</div>
+  <div class="hero-i">
+    <div class="hero-ey">Hastega &nbsp;·&nbsp; tooling</div>
+    <h1 class="hero-h1">claude-indexer</h1>
+    <p class="hero-s">Semantic code search for Claude Code, one or many codebases at a time. CocoIndex (tree-sitter) → OpenRouter embeddings → Qdrant → MCP server.</p>
+    <span class="hero-pill">macOS · Linux · Python ≥ 3.11</span>
+  </div>
+</header>
+
+<nav class="toc">
+  <div class="toc-i">
+    <span class="toc-l">jump to</span>
+    <a href="#prerequisites">Prerequisites</a>
+    <a href="#install">Install</a>
+    <a href="#first-run">First run</a>
+    <a href="#index">Index a codebase</a>
+    <a href="#daily">Day-to-day</a>
+    <a href="#config">Config</a>
+    <a href="#how">How it works</a>
+    <a href="#mcp-fork">MCP fork</a>
+    <a href="#trouble">Troubleshooting</a>
+  </div>
+</nav>
+
+<main>
+
+<section id="prerequisites">
+  <div class="sh"><div class="sh-bar"></div><div><div class="sh-l">Step 0</div><h2 class="sh-t">Prerequisites</h2></div></div>
+  <ul class="blist">
+    <li><strong>Docker</strong>&nbsp;+ <code>docker compose</code></li>
+    <li><strong>Python ≥ 3.11</strong></li>
+    <li><a href="https://docs.astral.sh/uv/"><strong>uv</strong></a> — used both to install this CLI and to run the MCP server</li>
+    <li><a href="https://docs.claude.com/claude-code"><strong>Claude Code CLI</strong></a> (<code>claude</code> in PATH)</li>
+    <li>An <a href="https://openrouter.ai/keys"><strong>OpenRouter API key</strong></a></li>
+  </ul>
+</section>
+
+<section id="install">
+  <div class="sh"><div class="sh-bar"></div><div><div class="sh-l">Step 1</div><h2 class="sh-t">Install</h2></div></div>
+<pre><code>git clone &lt;this-repo&gt; &amp;&amp; cd claude-indexing
+cp .env.example .env
+<span class="cmt"># edit .env: paste your OPENROUTER_API_KEY</span>
+uv sync          <span class="cmt"># or: pip install -e .</span></code></pre>
+</section>
+
+<section id="first-run">
+  <div class="sh"><div class="sh-bar"></div><div><div class="sh-l">Step 2</div><h2 class="sh-t">First Run</h2></div></div>
+<pre><code>indexer bootstrap     <span class="cmt"># starts Qdrant + Postgres in Docker</span></code></pre>
+</section>
+
+<section id="index">
+  <div class="sh"><div class="sh-bar"></div><div><div class="sh-l">Step 3</div><h2 class="sh-t">Index a Codebase</h2></div></div>
+<pre><code>indexer add ~/Code/myproject
+<span class="cmt">#</span> <span class="arr">→</span> <span class="cmt">creates a Qdrant collection</span>
+<span class="cmt">#</span> <span class="arr">→</span> <span class="cmt">does initial indexing (this can take several minutes for large repos)</span>
+<span class="cmt">#</span> <span class="arr">→</span> <span class="cmt">registers an MCP server named "myproject" with Claude Code (user scope)</span>
+
+<span class="cmt"># If the collection name is already taken in Qdrant (e.g. leftover from a</span>
+<span class="cmt"># previous setup), pass --reset to drop and recreate it:</span>
+indexer add ~/Code/myproject --reset</code></pre>
+  <div class="callout co-gold">
+    <div class="callout-t">Restart Claude Code</div>
+    <p>After registering the new MCP server, restart Claude Code so it picks it up. From any session you can now ask it to search the codebase semantically — it will call <code>qdrant-find</code> against the <code>myproject</code> collection.</p>
+  </div>
+</section>
+
+<section id="daily">
+  <div class="sh"><div class="sh-bar"></div><div><div class="sh-l">workflow</div><h2 class="sh-t">Day-to-Day</h2></div></div>
+<pre><code>indexer list                    <span class="cmt"># show registered projects</span>
+indexer update myproject        <span class="cmt"># incremental re-index</span>
+indexer live myproject          <span class="cmt"># watch mode, re-indexes on file change</span>
+indexer remove myproject        <span class="cmt"># drop collection + MCP registration</span>
+indexer status                  <span class="cmt"># check Docker + Qdrant + Postgres</span></code></pre>
+  <div class="card">
+    <p>You can have <strong>N projects</strong> registered simultaneously. Each gets its own Qdrant collection and its own MCP server name in Claude Code.</p>
+  </div>
+</section>
+
+<section id="config">
+  <div class="sh"><div class="sh-bar"></div><div><div class="sh-l">files</div><h2 class="sh-t">Config Files</h2></div></div>
+  <ul class="blist">
+    <li><code>.env</code> — secrets and embedding settings (local, gitignored)</li>
+    <li><code>~/.config/claude-indexer/config.json</code> — project registry (path, collection name, timestamp)</li>
+    <li><strong>Docker volumes</strong> — Qdrant index and Postgres state, persist across container restarts</li>
+  </ul>
+</section>
+
+<section id="how">
+  <div class="sh"><div class="sh-bar"></div><div><div class="sh-l">architecture</div><h2 class="sh-t">How It Works</h2></div></div>
+  <div class="tw"><table>
+    <thead><tr><th>Component</th><th>Role</th></tr></thead>
+    <tbody>
+      <tr><td><strong>CocoIndex</strong></td><td>tree-sitter chunking + incremental state (Postgres) + Qdrant export</td></tr>
+      <tr><td><strong>Qdrant</strong></td><td>vector DB (one collection per project)</td></tr>
+      <tr><td><strong>OpenRouter</strong></td><td>embedding model: <code>qwen/qwen3-embedding-8b</code> (4096-dim, configurable in <code>.env</code>)</td></tr>
+      <tr><td><strong>mcp-server-qdrant</strong></td><td>exposes <code>qdrant-find</code> to Claude Code</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="mcp-fork">
+  <div class="sh"><div class="sh-bar"></div><div><div class="sh-l">notes</div><h2 class="sh-t">MCP Server: Why a Fork</h2></div></div>
+  <p>The upstream <code>mcp-server-qdrant</code> (<a href="https://github.com/qdrant/mcp-server-qdrant/pull/118">PR #118</a>) exposes a hook for custom embedding providers, but the OpenRouter provider implementation lives only on a fork branch: <code>pablomichelettii/mcp-server-qdrant@feature/openrouter-provider</code>.</p>
+  <p>We install it on demand via <code>uvx --from git+&lt;fork&gt;@&lt;branch&gt; mcp-server-qdrant</code>. Claude Code runs that command every time it spawns the MCP server; uvx fetches and builds the fork into a temporary venv (cached afterwards in <code>~/.cache/uv/</code>).</p>
+
+  <div class="callout co-red">
+    <div class="callout-t">Caveat 1 — cache freshness</div>
+    <p>Once cached, new commits pushed to <code>feature/openrouter-provider</code> are <strong>not</strong> picked up automatically. To force a refresh, deregister and re-register the project (<code>indexer remove &lt;name&gt;</code> then <code>indexer add ...</code>), or run the MCP command manually with <code>uvx --refresh ...</code>.</p>
+  </div>
+
+  <div class="callout co-green">
+    <div class="callout-t">Caveat 2 — when upstream merges OpenRouter support</div>
+    <p>Swap the <code>MCP_GIT_URL</code> / <code>MCP_GIT_BRANCH</code> constants in <a href="src/indexer/mcp.py"><code>src/indexer/mcp.py</code></a> for the PyPI package: <code>uvx mcp-server-qdrant</code>. No other changes needed.</p>
+  </div>
+</section>
+
+<section id="trouble">
+  <div class="sh"><div class="sh-bar"></div><div><div class="sh-l">help</div><h2 class="sh-t">Troubleshooting</h2></div></div>
+
+  <div class="card card-gold">
+    <div class="callout-t" style="color:#9e7118"><code>Qdrant collection '&lt;name&gt;-codebase' already exists</code></div>
+    <p>The collection survived from a previous run (or another tool created it). Re-run with <code>--reset</code> to drop and recreate it:</p>
+    <pre style="margin-top:8px;margin-bottom:0"><code>indexer add /path --name &lt;name&gt; --reset</code></pre>
+    <p style="margin-top:10px;margin-bottom:0"><em>Destructive — all vectors in that collection are lost.</em></p>
+  </div>
+
+  <div class="card">
+    <div class="callout-t"><code>cocoindex setup failed</code></div>
+    <p>Check Docker is running: <code>docker compose ps</code>. Also run <code>indexer status</code> for a full health check.</p>
+  </div>
+
+  <div class="card">
+    <div class="callout-t">MCP server not visible in Claude Code</div>
+    <p>Run <code>claude mcp list</code> to confirm registration; restart Claude Code if needed.</p>
+  </div>
+
+  <div class="card">
+    <div class="callout-t">Want to start fresh</div>
+    <p><code>indexer remove &lt;name&gt;</code>, then <code>docker compose down -v</code> to wipe Qdrant and Postgres volumes.</p>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <strong>claude-indexer</strong> &nbsp;·&nbsp; Hastega
+</footer>
+
+</body>
+</html>
