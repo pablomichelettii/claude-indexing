@@ -35,6 +35,7 @@ VECTOR_FIELD = "embedding"
 
 
 INCLUDED_PATTERNS = [
+    # Programming languages
     "**/*.py",
     "**/*.ts", "**/*.tsx",
     "**/*.js", "**/*.jsx",
@@ -50,14 +51,29 @@ INCLUDED_PATTERNS = [
     "**/*.php",
     "**/*.vue",
     "**/*.svelte",
+    # Java enterprise UI and config
+    "**/*.jsp",
+    "**/*.xml",
+    "**/*.xsd",
+    "**/*.wsdl",
+    "**/*.properties",
+    # Docs and queries
+    "**/*.md",
+    "**/*.sql",
+    # Web (UI templates + source CSS)
+    "**/*.html",
+    "**/*.scss",
+    "**/*.less",
+    # Ops / config
+    "**/*.sh",
+    "**/*.yml", "**/*.yaml",
 ]
 
 EXCLUDED_PATTERNS = [
+    # Build outputs and dependency caches
     "**/target/**",
     "**/node_modules/**",
     "**/.git/**",
-    "**/*.min.js",
-    "**/*.min.css",
     "**/generated-sources/**",
     "**/generated/**",
     "**/__pycache__/**",
@@ -66,6 +82,16 @@ EXCLUDED_PATTERNS = [
     "**/.venv/**",
     "**/dist/**",
     "**/build/**",
+    # Editor / agent metadata
+    "**/.cursor/**",
+    "**/.claude/**",
+    "**/.vscode/**",
+    # Generated assets / minified / source maps
+    "**/*.min.js",
+    "**/*.min.css",
+    "**/*.map",
+    # Project-specific bulk artefacts seen in real codebases
+    "**/qdrant_storage/**",   # Qdrant data dir accidentally inside a source repo
 ]
 
 
