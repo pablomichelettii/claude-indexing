@@ -17,14 +17,16 @@ import numpy as np
 from numpy.typing import NDArray
 import cocoindex
 
+from indexer import defaults
+
 
 FLOW_NAME = os.environ["INDEXER_FLOW_NAME"]
 CODEBASE_PATH = os.environ["INDEXER_PATH"]
 COLLECTION_NAME = os.environ["INDEXER_COLLECTION"]
 OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
-EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "qwen/qwen3-embedding-8b")
-EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "4096"))
-QDRANT_GRPC_URL = os.environ.get("QDRANT_GRPC_URL", "http://localhost:6334")
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", defaults.EMBEDDING_MODEL)
+EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", str(defaults.EMBEDDING_DIM)))
+QDRANT_GRPC_URL = os.environ.get("QDRANT_GRPC_URL", defaults.QDRANT_GRPC_URL)
 
 
 INCLUDED_PATTERNS = [

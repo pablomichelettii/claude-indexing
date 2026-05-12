@@ -125,6 +125,7 @@ footer strong{color:white;letter-spacing:.18em}
     <a href="#config">Config</a>
     <a href="#how">How it works</a>
     <a href="#mcp-fork">MCP fork</a>
+    <a href="#resume">Interrupt &amp; resume</a>
     <a href="#trouble">Troubleshooting</a>
   </div>
 </nav>
@@ -169,6 +170,14 @@ indexer add ~/Code/myproject --reset</code></pre>
     <div class="callout-t">Restart Claude Code</div>
     <p>After registering the new MCP server, restart Claude Code so it picks it up. From any session you can now ask it to search the codebase semantically — it will call <code>qdrant-find</code> against the <code>myproject</code> collection.</p>
   </div>
+
+  <h3>Flags for recovering from a dirty state</h3>
+  <ul class="blist">
+    <li><code>--reset</code> — drop a stray Qdrant collection with the same name before setup. Use when the project is <strong>new to the CLI</strong> but a leftover collection exists in Qdrant (e.g. from a previous manual setup).</li>
+    <li><code>--force</code> — if a project with this name is already in the CLI registry, wipe it completely (cocoindex state, Qdrant collection, MCP registration, local config) and start fresh. <strong>Destructive.</strong></li>
+  </ul>
+<pre><code>indexer add ~/Code/myproject --reset    <span class="cmt"># leftover Qdrant collection? clear it.</span>
+indexer add ~/Code/myproject --force    <span class="cmt"># already registered? blow it away and re-add.</span></code></pre>
 </section>
 
 <section id="daily">
@@ -177,7 +186,7 @@ indexer add ~/Code/myproject --reset</code></pre>
 indexer update myproject        <span class="cmt"># incremental re-index</span>
 indexer live myproject          <span class="cmt"># watch mode, re-indexes on file change</span>
 indexer remove myproject        <span class="cmt"># drop collection + MCP registration</span>
-indexer status                  <span class="cmt"># check Docker + Qdrant + Postgres</span></code></pre>
+indexer status                  <span class="cmt"># check Qdrant + Postgres reachability + list projects</span></code></pre>
   <div class="card">
     <p>You can have <strong>N projects</strong> registered simultaneously. Each gets its own Qdrant collection and its own MCP server name in Claude Code.</p>
   </div>
@@ -187,9 +196,14 @@ indexer status                  <span class="cmt"># check Docker + Qdrant + Post
   <div class="sh"><div class="sh-bar"></div><div><div class="sh-l">files</div><h2 class="sh-t">Config Files</h2></div></div>
   <ul class="blist">
     <li><code>.env</code> — secrets and embedding settings (local, gitignored)</li>
-    <li><code>~/.config/claude-indexer/config.json</code> — project registry (path, collection name, timestamp)</li>
+    <li><code>~/.config/claude-indexer/config.json</code> — project registry (path, collection name, MCP scope, timestamp)</li>
     <li><strong>Docker volumes</strong> — Qdrant index and Postgres state, persist across container restarts</li>
   </ul>
+
+  <h3>A note on the OpenRouter API key</h3>
+  <div class="callout co-gold">
+    <p>When <code>indexer add</code> registers the MCP server, the key is passed via <code>-e OPENROUTER_API_KEY=...</code> to <code>claude mcp add</code>. Claude Code then stores it in its own config so the MCP server can read it on startup. The key is <strong>visible in plaintext</strong> there and in the output of <code>claude mcp list</code>. Acceptable for a personal dev tool; if you need stricter isolation, run the indexer as a different OS user.</p>
+  </div>
 </section>
 
 <section id="how">
@@ -221,12 +235,19 @@ indexer status                  <span class="cmt"># check Docker + Qdrant + Post
   </div>
 </section>
 
+<section id="resume">
+  <div class="sh"><div class="sh-bar"></div><div><div class="sh-l">recovery</div><h2 class="sh-t">Interrupting and Resuming</h2></div></div>
+  <p>Indexing is incremental — CocoIndex commits state to Postgres after each processed file. <strong>Ctrl-C is safe</strong>: files already indexed stay indexed. To resume an interrupted <code>indexer add</code> run:</p>
+<pre><code>indexer update &lt;name&gt;     <span class="cmt"># resumes from where it left off + finishes MCP registration</span></code></pre>
+  <p>The project is recorded in the local registry as soon as <code>cocoindex setup</code> succeeds (before the long embedding phase), so even an early Ctrl-C leaves a recoverable state.</p>
+</section>
+
 <section id="trouble">
   <div class="sh"><div class="sh-bar"></div><div><div class="sh-l">help</div><h2 class="sh-t">Troubleshooting</h2></div></div>
 
   <div class="card card-gold">
     <div class="callout-t" style="color:#9e7118"><code>Qdrant collection '&lt;name&gt;-codebase' already exists</code></div>
-    <p>The collection survived from a previous run (or another tool created it). Re-run with <code>--reset</code> to drop and recreate it:</p>
+    <p>The collection survived from a previous run (or another tool created it). Re-run with <code>--reset</code> (project new to the CLI) or <code>--force</code> (project already registered):</p>
     <pre style="margin-top:8px;margin-bottom:0"><code>indexer add /path --name &lt;name&gt; --reset</code></pre>
     <p style="margin-top:10px;margin-bottom:0"><em>Destructive — all vectors in that collection are lost.</em></p>
   </div>

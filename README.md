@@ -55,7 +55,7 @@ indexer list                    # show registered projects
 indexer update myproject        # incremental re-index
 indexer live myproject          # watch mode, re-indexes on file change
 indexer remove myproject        # drop collection + MCP registration
-indexer status                  # check Docker + Qdrant + Postgres
+indexer status                  # check Qdrant + Postgres reachability + list projects
 ```
 
 You can have N projects registered simultaneously. Each gets its own Qdrant collection and its own MCP server name in Claude Code.
@@ -63,8 +63,12 @@ You can have N projects registered simultaneously. Each gets its own Qdrant coll
 ## Config files
 
 - `.env` — secrets and embedding settings (local, gitignored)
-- `~/.config/claude-indexer/config.json` — project registry (path, collection name, timestamp)
+- `~/.config/claude-indexer/config.json` — project registry (path, collection name, MCP scope, timestamp)
 - Docker volumes — Qdrant index and Postgres state, persist across container restarts
+
+### A note on the OpenRouter API key
+
+When `indexer add` registers the MCP server with Claude Code, the key is passed via `-e OPENROUTER_API_KEY=...` to `claude mcp add`. Claude Code then stores it in its own config (`~/.claude/mcp.json` or the equivalent for the chosen scope) so the MCP server can read it on startup. The key is **visible in plaintext** there and in the output of `claude mcp list`. Acceptable for a personal dev tool; if you need stricter isolation, run the indexer as a different OS user.
 
 ## How it works
 

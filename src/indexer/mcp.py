@@ -25,6 +25,15 @@ def _claude_bin() -> str:
     return claude
 
 
+def _check_uvx() -> None:
+    if not shutil.which("uvx"):
+        raise RuntimeError(
+            "`uvx` not found in PATH — required because the MCP server is "
+            "installed on demand via `uvx --from git+<fork>`. Install uv: "
+            "https://docs.astral.sh/uv/"
+        )
+
+
 def remove(name: str) -> None:
     subprocess.run(
         [_claude_bin(), "mcp", "remove", name],
@@ -44,6 +53,7 @@ def add(
     scope: str = "user",
 ) -> None:
     """(Re-)register the MCP server. Idempotent: removes first, then adds."""
+    _check_uvx()
     remove(name)
     cmd = [
         _claude_bin(), "mcp", "add", name,

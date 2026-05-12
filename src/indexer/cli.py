@@ -24,7 +24,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from . import config, mcp
+from . import config, defaults, mcp
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -47,6 +47,13 @@ def _load_env() -> None:
 def _slugify(name: str) -> str:
     s = re.sub(r"[^a-zA-Z0-9_-]+", "-", name).strip("-").lower()
     return s or "project"
+
+
+def _flow_name(project_name: str) -> str:
+    """Cocoindex uses the flow name as part of Postgres table identifiers.
+    Replace dashes with underscores to avoid quoting issues downstream.
+    """
+    return "CodeIndex_" + project_name.replace("-", "_")
 
 
 def _run_cocoindex(args: list[str], project: dict, flow_name: str) -> int:
@@ -103,7 +110,7 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     _load_env()
     print("→ starting Docker services (Qdrant + Postgres)…")
     _docker_compose_up()
-    qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+    qdrant_url = os.environ.get("QDRANT_URL", defaults.QDRANT_URL)
 
     print("→ waiting for Qdrant…")
     for _ in range(60):
@@ -134,8 +141,8 @@ def cmd_add(args: argparse.Namespace) -> int:
     name = args.name or _slugify(path.name)
     collection = f"{name}-codebase"
     project = {"path": str(path), "collection": collection}
-    flow_name = f"CodeIndex_{name}"
-    qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+    flow_name = _flow_name(name)
+    qdrant_url = os.environ.get("QDRANT_URL", defaults.QDRANT_URL)
 
     existing = config.get_project(name)
     if existing and not args.force:
@@ -184,7 +191,7 @@ def cmd_add(args: argparse.Namespace) -> int:
         name,
         collection=collection,
         openrouter_api_key=os.environ["OPENROUTER_API_KEY"],
-        embedding_model=os.environ.get("EMBEDDING_MODEL", "qwen/qwen3-embedding-8b"),
+        embedding_model=os.environ.get("EMBEDDING_MODEL", defaults.EMBEDDING_MODEL),
         qdrant_url=qdrant_url,
         scope=args.scope,
     )
@@ -209,7 +216,7 @@ def cmd_update(args: argparse.Namespace) -> int:
     project = config.get_project(args.name)
     if not project:
         sys.exit(f"unknown project: {args.name}")
-    flow_name = f"CodeIndex_{args.name}"
+    flow_name = _flow_name(args.name)
     rc = _run_cocoindex(["update"], project, flow_name)
     if rc != 0:
         return rc
@@ -220,8 +227,8 @@ def cmd_update(args: argparse.Namespace) -> int:
         args.name,
         collection=project["collection"],
         openrouter_api_key=os.environ["OPENROUTER_API_KEY"],
-        embedding_model=os.environ.get("EMBEDDING_MODEL", "qwen/qwen3-embedding-8b"),
-        qdrant_url=os.environ.get("QDRANT_URL", "http://localhost:6333"),
+        embedding_model=os.environ.get("EMBEDDING_MODEL", defaults.EMBEDDING_MODEL),
+        qdrant_url=os.environ.get("QDRANT_URL", defaults.QDRANT_URL),
         scope=project["scope"],
     )
     return 0
@@ -232,7 +239,7 @@ def cmd_live(args: argparse.Namespace) -> int:
     project = config.get_project(args.name)
     if not project:
         sys.exit(f"unknown project: {args.name}")
-    flow_name = f"CodeIndex_{args.name}"
+    flow_name = _flow_name(args.name)
     print(f"→ live indexing '{args.name}' (Ctrl-C to stop)")
     return _run_cocoindex(["update", "--live"], project, flow_name)
 
@@ -243,7 +250,7 @@ def cmd_remove(args: argparse.Namespace) -> int:
     if not project:
         sys.exit(f"unknown project: {args.name}")
 
-    flow_name = f"CodeIndex_{args.name}"
+    flow_name = _flow_name(args.name)
     print(f"→ dropping cocoindex state + Qdrant collection for '{args.name}'…")
     rc = _run_cocoindex(["drop", "--force"], project, flow_name)
     if rc != 0:
@@ -263,7 +270,7 @@ def cmd_remove(args: argparse.Namespace) -> int:
 
 def cmd_status(args: argparse.Namespace) -> int:
     _load_env()
-    qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
+    qdrant_url = os.environ.get("QDRANT_URL", defaults.QDRANT_URL)
     print(f"Qdrant ({qdrant_url}): {'✓' if _http_ok(qdrant_url) else '✗'}")
 
     pg_ok = subprocess.call(
