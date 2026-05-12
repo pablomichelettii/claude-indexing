@@ -34,10 +34,16 @@ indexer add ~/Code/myproject
 # → creates a Qdrant collection
 # → does initial indexing (this can take several minutes for large repos)
 # → registers an MCP server named "myproject" with Claude Code (user scope)
+```
 
-# If the collection name is already taken in Qdrant (e.g. leftover from a
-# previous setup), pass --reset to drop and recreate it:
-indexer add ~/Code/myproject --reset
+**Flags for recovering from a dirty state:**
+
+- `--reset` — drop a stray Qdrant collection with the same name before setup. Use this when the project is **new to the CLI** but a leftover collection exists in Qdrant (e.g. from a previous manual setup).
+- `--force` — if a project with this name is already in the CLI registry, wipe it completely (cocoindex state, Qdrant collection, MCP registration, local config) and start fresh. Destructive.
+
+```bash
+indexer add ~/Code/myproject --reset    # leftover Qdrant collection? clear it.
+indexer add ~/Code/myproject --force    # already registered? blow it away and re-add.
 ```
 
 Then **restart Claude Code** so it picks up the new MCP server. From any session you can now ask it to search the codebase semantically — it will call `qdrant-find` against the `myproject` collection.
@@ -79,6 +85,16 @@ We install it on demand via `uvx --from git+<fork>@<branch> mcp-server-qdrant`. 
 
 - **Cache freshness.** Once cached, new commits pushed to `feature/openrouter-provider` are **not** picked up automatically. To force a refresh, deregister and re-register the project (`indexer remove <name>` then `indexer add ...`), or run the MCP command manually with `uvx --refresh ...`.
 - **When upstream merges OpenRouter support.** Swap the `MCP_GIT_URL`/`MCP_GIT_BRANCH` constants in [src/indexer/mcp.py](src/indexer/mcp.py) for the PyPI package: `uvx mcp-server-qdrant`. No other changes needed.
+
+## Interrupting and resuming
+
+Indexing is incremental — CocoIndex commits state to Postgres after each processed file. **Ctrl-C is safe**: files already indexed stay indexed. To resume an interrupted `indexer add` run:
+
+```bash
+indexer update <name>     # resumes from where it left off + finishes MCP registration
+```
+
+The project is recorded in the local registry as soon as `cocoindex setup` succeeds (before the long embedding phase), so even an early Ctrl-C leaves a recoverable state.
 
 ## Troubleshooting
 

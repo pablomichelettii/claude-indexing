@@ -6,10 +6,14 @@ Schema:
     "<name>": {
       "path": "/abs/path/to/codebase",
       "collection": "<qdrant-collection-name>",
+      "scope": "user",          # MCP scope chosen at add-time
       "added_at": "2026-05-12T10:30:00"
     }
   }
 }
+
+Older entries written before 2026-05-12 may lack `scope`; `get_project` fills
+in the default ("user") on read so callers can rely on the field.
 """
 
 from __future__ import annotations
@@ -43,11 +47,12 @@ def save(cfg: dict) -> None:
     config_path().write_text(json.dumps(cfg, indent=2) + "\n")
 
 
-def add_project(name: str, path: str, collection: str) -> None:
+def add_project(name: str, path: str, collection: str, scope: str = "user") -> None:
     cfg = load()
     cfg["projects"][name] = {
         "path": str(Path(path).expanduser().resolve()),
         "collection": collection,
+        "scope": scope,
         "added_at": datetime.now().isoformat(timespec="seconds"),
     }
     save(cfg)
@@ -62,7 +67,10 @@ def remove_project(name: str) -> dict | None:
 
 
 def get_project(name: str) -> dict | None:
-    return load()["projects"].get(name)
+    proj = load()["projects"].get(name)
+    if proj is not None:
+        proj.setdefault("scope", "user")  # backward-compat for entries written before scope was tracked
+    return proj
 
 
 def list_projects() -> dict:

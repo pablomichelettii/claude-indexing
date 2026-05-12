@@ -17,6 +17,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -87,21 +88,39 @@ def _docker_compose_up() -> None:
     )
 
 
+def _postgres_ready() -> bool:
+    return subprocess.call(
+        ["docker", "compose", "exec", "-T", "postgres", "pg_isready", "-U", "cocoindex"],
+        cwd=REPO_ROOT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    ) == 0
+
+
 # ─── commands ─────────────────────────────────────────────────────────────
 
 def cmd_bootstrap(args: argparse.Namespace) -> int:
     _load_env()
     print("→ starting Docker services (Qdrant + Postgres)…")
     _docker_compose_up()
-    print("→ waiting for Qdrant…")
     qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
-    import time
+
+    print("→ waiting for Qdrant…")
     for _ in range(60):
         if _http_ok(f"{qdrant_url}/healthz") or _http_ok(qdrant_url):
             break
         time.sleep(1)
     else:
         sys.exit("Qdrant didn't come up in 60s")
+
+    print("→ waiting for Postgres…")
+    for _ in range(60):
+        if _postgres_ready():
+            break
+        time.sleep(1)
+    else:
+        sys.exit("Postgres didn't come up in 60s")
+
     print("✓ ready. Now: indexer add /path/to/codebase")
     return 0
 
@@ -113,19 +132,33 @@ def cmd_add(args: argparse.Namespace) -> int:
         sys.exit(f"not a directory: {path}")
 
     name = args.name or _slugify(path.name)
-    if config.get_project(name) and not args.force:
-        sys.exit(f"project '{name}' already exists. Use --force to overwrite or pick another --name.")
-
     collection = f"{name}-codebase"
     project = {"path": str(path), "collection": collection}
     flow_name = f"CodeIndex_{name}"
     qdrant_url = os.environ.get("QDRANT_URL", "http://localhost:6333")
 
+    existing = config.get_project(name)
+    if existing and not args.force:
+        sys.exit(
+            f"project '{name}' already exists. Use --force to wipe and recreate "
+            f"it, or pick a different --name."
+        )
+
     print(f"→ project '{name}'  path={path}  collection={collection}")
 
+    # --force: nuke EVERYTHING tied to this project before starting fresh.
+    if existing and args.force:
+        print(f"→ --force: dropping existing project '{name}' (cocoindex state + Qdrant + MCP + config)…")
+        _run_cocoindex(["drop", "--force"], existing, flow_name)
+        if _qdrant_collection_exists(qdrant_url, collection):
+            _qdrant_drop_collection(qdrant_url, collection)
+        mcp.remove(name)
+        config.remove_project(name)
+
+    # --reset: handle leftover Qdrant collection from a previous (pre-CLI) setup.
     if _qdrant_collection_exists(qdrant_url, collection):
-        if args.reset:
-            print(f"→ --reset: dropping existing Qdrant collection '{collection}'…")
+        if args.reset or args.force:
+            print(f"→ dropping leftover Qdrant collection '{collection}'…")
             _qdrant_drop_collection(qdrant_url, collection)
         else:
             sys.exit(
@@ -137,9 +170,14 @@ def cmd_add(args: argparse.Namespace) -> int:
     if _run_cocoindex(["setup", "--force"], project, flow_name) != 0:
         sys.exit("cocoindex setup failed")
 
-    print("→ cocoindex update (initial index, this may take a while)…")
+    # Register the project in the local config BEFORE the long-running update.
+    # If the user Ctrl-Cs during update, the project is still recoverable via
+    # `indexer update <name>` (cocoindex resumes from its Postgres state).
+    config.add_project(name, str(path), collection, scope=args.scope)
+
+    print(f"→ cocoindex update (initial index, this may take a while; Ctrl-C is safe — resume with `indexer update {name}`)…")
     if _run_cocoindex(["update"], project, flow_name) != 0:
-        sys.exit("cocoindex update failed")
+        sys.exit(f"cocoindex update failed — resume with: indexer update {name}")
 
     print(f"→ registering MCP server '{name}' with Claude Code…")
     mcp.add(
@@ -147,11 +185,10 @@ def cmd_add(args: argparse.Namespace) -> int:
         collection=collection,
         openrouter_api_key=os.environ["OPENROUTER_API_KEY"],
         embedding_model=os.environ.get("EMBEDDING_MODEL", "qwen/qwen3-embedding-8b"),
-        qdrant_url=os.environ.get("QDRANT_URL", "http://localhost:6333"),
+        qdrant_url=qdrant_url,
         scope=args.scope,
     )
 
-    config.add_project(name, str(path), collection)
     print(f"✓ '{name}' indexed and ready. Restart Claude Code to pick up the MCP server.")
     return 0
 
@@ -173,7 +210,21 @@ def cmd_update(args: argparse.Namespace) -> int:
     if not project:
         sys.exit(f"unknown project: {args.name}")
     flow_name = f"CodeIndex_{args.name}"
-    return _run_cocoindex(["update"], project, flow_name)
+    rc = _run_cocoindex(["update"], project, flow_name)
+    if rc != 0:
+        return rc
+    # Ensure MCP is registered (recovers from an interrupted `indexer add`).
+    # Use the scope stored at add-time so we don't silently downgrade it.
+    print(f"→ ensuring MCP server '{args.name}' is registered…")
+    mcp.add(
+        args.name,
+        collection=project["collection"],
+        openrouter_api_key=os.environ["OPENROUTER_API_KEY"],
+        embedding_model=os.environ.get("EMBEDDING_MODEL", "qwen/qwen3-embedding-8b"),
+        qdrant_url=os.environ.get("QDRANT_URL", "http://localhost:6333"),
+        scope=project["scope"],
+    )
+    return 0
 
 
 def cmd_live(args: argparse.Namespace) -> int:
@@ -194,7 +245,13 @@ def cmd_remove(args: argparse.Namespace) -> int:
 
     flow_name = f"CodeIndex_{args.name}"
     print(f"→ dropping cocoindex state + Qdrant collection for '{args.name}'…")
-    _run_cocoindex(["drop", "--force"], project, flow_name)
+    rc = _run_cocoindex(["drop", "--force"], project, flow_name)
+    if rc != 0:
+        sys.exit(
+            f"cocoindex drop failed (rc={rc}). Local config and MCP not touched.\n"
+            f"Investigate, then either retry `indexer remove {args.name}` or "
+            f"clean up manually."
+        )
 
     print(f"→ deregistering MCP server '{args.name}'…")
     mcp.remove(args.name)
@@ -235,9 +292,14 @@ def main() -> int:
     a.add_argument("--name", help="project name (default: dir basename slug)")
     a.add_argument("--scope", default="user", choices=["user", "project", "local"],
                    help="Claude Code MCP scope (default: user)")
-    a.add_argument("--force", action="store_true", help="overwrite existing project")
+    a.add_argument("--force", action="store_true",
+                   help="if a project with this name exists, wipe it completely "
+                        "(cocoindex state, Qdrant collection, MCP, local config) "
+                        "before adding")
     a.add_argument("--reset", action="store_true",
-                   help="drop the Qdrant collection first if it already exists")
+                   help="drop a stray Qdrant collection with the same name "
+                        "before setup (use when the project is NEW to this CLI "
+                        "but a leftover collection exists in Qdrant)")
     a.set_defaults(func=cmd_add)
 
     sub.add_parser("list", help="list projects").set_defaults(func=cmd_list)
