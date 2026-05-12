@@ -67,6 +67,7 @@ INCLUDED_PATTERNS = [
     # Ops / config
     "**/*.sh",
     "**/*.yml", "**/*.yaml",
+    "**/*.json",
 ]
 
 EXCLUDED_PATTERNS = [
@@ -90,6 +91,11 @@ EXCLUDED_PATTERNS = [
     "**/*.min.js",
     "**/*.min.css",
     "**/*.map",
+    # Lock files (machine-generated, rarely useful for semantic search)
+    "**/*.lock",
+    "**/*-lock.json",
+    "**/pnpm-lock.yaml",
+    "**/bun.lockb",
     # Project-specific bulk artefacts seen in real codebases
     "**/qdrant_storage/**",   # Qdrant data dir accidentally inside a source repo
 ]
