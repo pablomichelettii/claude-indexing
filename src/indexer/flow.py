@@ -12,6 +12,7 @@ Invoked indirectly via `cocoindex update src/indexer/flow.py`.
 """
 
 import os
+import sys
 import hashlib
 import numpy as np
 from numpy.typing import NDArray
@@ -243,13 +244,66 @@ def code_to_embedding(
     )
 
 
+def _scan_unreadable(root: str) -> list[str]:
+    """Walk `root` and return relpaths of files/dirs the current user can't read.
+
+    cocoindex's LocalFile source aborts the whole run if it hits a single
+    permission-denied error (e.g. a root:root file inside a user-owned tree).
+    By collecting these paths up-front we can both surface them to the user
+    AND feed them into excluded_patterns so the run completes.
+    """
+    unreadable: list[str] = []
+
+    def _on_error(err: OSError) -> None:
+        # Triggered when os.walk can't list a directory (e.g. no +x perm).
+        try:
+            rel = os.path.relpath(err.filename, root)
+        except ValueError:
+            rel = err.filename
+        print(f"[indexer] WARNING: cannot access {rel}: {err.strerror} — skipping", file=sys.stderr)
+        unreadable.append(rel)
+
+    for dirpath, _dirnames, filenames in os.walk(root, onerror=_on_error, followlinks=False):
+        for name in filenames:
+            full = os.path.join(dirpath, name)
+            if not os.access(full, os.R_OK):
+                rel = os.path.relpath(full, root)
+                print(f"[indexer] WARNING: unreadable file (permission denied): {rel} — skipping", file=sys.stderr)
+                unreadable.append(rel)
+    return unreadable
+
+
+def _confirm_continue(unreadable: list[str]) -> None:
+    """If unreadable paths were found, ask the user whether to proceed.
+
+    Non-interactive runs (no TTY) proceed automatically — otherwise the
+    indexer would deadlock in CI or when launched by a hook. Set
+    INDEXER_SKIP_UNREADABLE_PROMPT=1 to also bypass the prompt in a TTY.
+    """
+    if not unreadable:
+        return
+    if os.environ.get("INDEXER_SKIP_UNREADABLE_PROMPT") == "1" or not sys.stdin.isatty():
+        print(f"[indexer] proceeding past {len(unreadable)} unreadable path(s) (non-interactive)", file=sys.stderr)
+        return
+    try:
+        answer = input(f"[indexer] {len(unreadable)} unreadable path(s) will be skipped. Continue? [Y/n] ").strip().lower()
+    except EOFError:
+        answer = ""
+    if answer in ("n", "no"):
+        sys.exit("[indexer] aborted by user")
+
+
 @cocoindex.flow_def(name=FLOW_NAME)
 def code_index_flow(flow_builder: cocoindex.FlowBuilder, data_scope: cocoindex.DataScope):
+    unreadable = _scan_unreadable(CODEBASE_PATH)
+    _confirm_continue(unreadable)
+    excluded = list(EXCLUDED_PATTERNS) + unreadable
+
     data_scope["files"] = flow_builder.add_source(
         cocoindex.sources.LocalFile(
             path=CODEBASE_PATH,
             included_patterns=INCLUDED_PATTERNS,
-            excluded_patterns=EXCLUDED_PATTERNS,
+            excluded_patterns=excluded,
         )
     )
 
