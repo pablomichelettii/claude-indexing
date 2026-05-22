@@ -1,3 +1,4 @@
+# PYTHON_ARGCOMPLETE_OK
 """indexer CLI — manage semantic-search projects for Claude Code.
 
 Subcommands:
@@ -20,6 +21,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -178,7 +180,38 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
         sys.exit("Postgres didn't come up in 60s")
 
     print("✓ ready. Now: indexer add /path/to/codebase")
+    _print_completion_hint()
     return 0
+
+
+def _print_completion_hint() -> None:
+    """Tell the user how to enable tab-completion for the indexer CLI."""
+    shell = os.environ.get("SHELL", "")
+    if shell.endswith("zsh"):
+        rc, snippet = "~/.zshrc", (
+            'autoload -U bashcompinit && bashcompinit\n'
+            'eval "$(register-python-argcomplete indexer)"'
+        )
+    elif shell.endswith("bash"):
+        rc, snippet = "~/.bashrc", 'eval "$(register-python-argcomplete indexer)"'
+    else:
+        rc, snippet = "~/.zshrc or ~/.bashrc", (
+            'autoload -U bashcompinit && bashcompinit   # zsh only\n'
+            'eval "$(register-python-argcomplete indexer)"'
+        )
+
+    if not shutil.which("register-python-argcomplete"):
+        # argcomplete not installed in PATH — skip the hint silently rather than
+        # confuse the user with a command they can't run.
+        return
+
+    print()
+    print("→ To enable tab-completion for `indexer`, add to " + rc + ":")
+    print()
+    for line in snippet.splitlines():
+        print("    " + line)
+    print()
+    print("  Then reload your shell (e.g. `source " + rc + "`).")
 
 
 def cmd_add(args: argparse.Namespace) -> int:
@@ -503,6 +536,12 @@ def main() -> int:
     le.add_argument("path", help="path to your .env file")
     le.add_argument("--force", action="store_true", help="overwrite existing symlink/file")
     le.set_defaults(func=cmd_link_env)
+
+    try:
+        import argcomplete
+        argcomplete.autocomplete(p)
+    except ImportError:
+        pass
 
     args = p.parse_args()
     return args.func(args)
