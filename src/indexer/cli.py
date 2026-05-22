@@ -35,6 +35,7 @@ from . import config, defaults, mcp
 _PKG_DIR = Path(__file__).resolve().parent
 FLOW_FILE = _PKG_DIR / "flow.py"
 COMPOSE_FILE = _PKG_DIR / "docker-compose.yml"
+SKILLS_TEMPLATE_DIR = _PKG_DIR / "skills"
 _CONFIG_DIR = Path.home() / ".config" / "claude-indexer"
 _USER_DOTENV = _CONFIG_DIR / ".env"
 # Prefer the user-config .env (stable across installs); fall back to package dir for dev mode.
@@ -189,6 +190,10 @@ def cmd_add(args: argparse.Namespace) -> int:
     indexerconf = _load_indexerconf(path)
     if indexerconf:
         print(f"→ loaded .indexerconf from {path}")
+    else:
+        auto_name = args.name or _slugify(path.name)
+        _write_indexerconf(path, auto_name, f"{auto_name}-codebase", force=False)
+        indexerconf = _load_indexerconf(path)
     name = args.name or indexerconf.get("name") or _slugify(path.name)
     collection = indexerconf.get("collection") or f"{name}-codebase"
     project = {"path": str(path), "collection": collection}
@@ -246,6 +251,8 @@ def cmd_add(args: argparse.Namespace) -> int:
         qdrant_url=qdrant_url,
         scope=args.scope,
     )
+
+    _install_skill(path, name, force=args.force)
 
     print(f"✓ '{name}' indexed and ready. Restart Claude Code to pick up the MCP server.")
     return 0
@@ -360,12 +367,20 @@ def cmd_service_update(args: argparse.Namespace) -> int:
     return cmd_bootstrap(args)
 
 
-def cmd_create_config(args: argparse.Namespace) -> int:
-    cwd = Path.cwd()
-    conf_file = cwd / ".indexerconf"
-    if conf_file.exists() and not args.force:
-        sys.exit(f".indexerconf already exists in {cwd}. Use --force to overwrite.")
-    name = _slugify(cwd.name)
+def _write_indexerconf(target_dir: Path, name: str, collection: str, force: bool) -> bool:
+    """Write a .indexerconf in target_dir. Returns True if written, False if skipped.
+
+    Prompts the user for name and collection. Empty input keeps the supplied default.
+    """
+    conf_file = target_dir / ".indexerconf"
+    if conf_file.exists() and not force:
+        return False
+    answer = input(f"project name [{name}]: ").strip()
+    if answer:
+        name = answer
+    default_collection = collection if collection else f"{name}-codebase"
+    answer = input(f"Qdrant collection [{default_collection}]: ").strip()
+    collection = answer or default_collection
     conf_file.write_text(
         f"# indexer configuration for this project\n"
         f"# place this file in the root of your codebase\n"
@@ -374,10 +389,39 @@ def cmd_create_config(args: argparse.Namespace) -> int:
         f"name: {name}\n"
         f"\n"
         f"# Qdrant collection name (default: <name>-codebase)\n"
-        f"collection: {name}-codebase\n"
+        f"collection: {collection}\n"
     )
     print(f"✓ created {conf_file}")
+    return True
+
+
+def cmd_create_config(args: argparse.Namespace) -> int:
+    cwd = Path.cwd()
+    name = _slugify(cwd.name)
+    if not _write_indexerconf(cwd, name, f"{name}-codebase", force=args.force):
+        sys.exit(f".indexerconf already exists in {cwd}. Use --force to overwrite.")
     return 0
+
+
+def _install_skill(project_path: Path, mcp_name: str, force: bool = False) -> None:
+    """Copy each skill template into <project>/.claude/skills/, replacing placeholders."""
+    if not SKILLS_TEMPLATE_DIR.is_dir():
+        return
+    target_dir = project_path / ".claude" / "skills"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    replacements = {
+        "${mcp-find-tool}": f"mcp__{mcp_name}__qdrant-find",
+    }
+    for template in SKILLS_TEMPLATE_DIR.glob("*.md"):
+        target = target_dir / template.name
+        if target.exists() and not force:
+            print(f"→ skill '{template.name}' already exists at {target} — skipping")
+            continue
+        content = template.read_text()
+        for placeholder, value in replacements.items():
+            content = content.replace(placeholder, value)
+        target.write_text(content)
+        print(f"✓ installed skill {target}")
 
 
 def cmd_link_env(args: argparse.Namespace) -> int:

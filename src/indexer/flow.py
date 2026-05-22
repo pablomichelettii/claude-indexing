@@ -70,31 +70,144 @@ INCLUDED_PATTERNS = [
 ]
 
 EXCLUDED_PATTERNS = [
-    # Build outputs and dependency caches
-    "**/target/**",
-    "**/node_modules/**",
+    # VCS / generic
     "**/.git/**",
+    "**/.hg/**",
+    "**/.svn/**",
     "**/generated-sources/**",
     "**/generated/**",
-    "**/__pycache__/**",
-    "**/.gradle/**",
+
+    # Editor / agent / IDE metadata
     "**/.idea/**",
-    "**/.venv/**",
-    "**/dist/**",
-    "**/build/**",
-    # Editor / agent metadata
+    "**/.vscode/**",
     "**/.cursor/**",
     "**/.claude/**",
-    "**/.vscode/**",
-    # Generated assets / minified / source maps
+    "**/.fleet/**",
+    "**/.settings/**",
+    "**/.project",
+    "**/.classpath",
+    "**/.factorypath",
+
+    # --- Java / Spring Boot / Maven / Gradle ---
+    "**/target/**",                # Maven build output
+    "**/build/**",                 # Gradle build output (also used by others)
+    "**/out/**",                   # IntelliJ compiled output
+    "**/.gradle/**",
+    "**/.mvn/wrapper/maven-wrapper.jar",
+    "**/bin/**",                   # Eclipse compiled output
+    "**/*.class",
+    "**/*.jar",
+    "**/*.war",
+    "**/*.ear",
+    "**/*.nar",
+    "**/hs_err_pid*.log",
+    "**/dependency-reduced-pom.xml",
+
+    # --- PHP / Laravel / Composer ---
+    "**/vendor/**",
+    "**/bootstrap/cache/**",
+    "**/storage/framework/**",
+    "**/storage/logs/**",
+    "**/storage/debugbar/**",
+    "**/public/hot",
+    "**/public/storage",
+    "**/.phpunit.result.cache",
+    "**/.phpunit.cache/**",
+    "**/.php-cs-fixer.cache",
+    "**/.php_cs.cache",
+    "**/.phpstan.cache/**",
+    "**/.psalm/**",
+
+    # --- Go ---
+    "**/vendor/**",                # also Go modules vendor dir
+    "**/bin/**",
+    "**/pkg/**",
+    "**/*.test",
+    "**/*.out",
+    "**/go.sum",
+
+    # --- Node / JS / TS (Angular, React, Vue, Svelte, Next, Nuxt, etc.) ---
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/out/**",
+    "**/.next/**",
+    "**/.nuxt/**",
+    "**/.svelte-kit/**",
+    "**/.angular/**",
+    "**/.turbo/**",
+    "**/.parcel-cache/**",
+    "**/.cache/**",
+    "**/.vite/**",
+    "**/.rollup.cache/**",
+    "**/.webpack/**",
+    "**/.expo/**",
+    "**/.remix/**",
+    "**/.docusaurus/**",
+    "**/.astro/**",
+    "**/coverage/**",
+    "**/.nyc_output/**",
+    "**/storybook-static/**",
+    "**/.eslintcache",
+    "**/.stylelintcache",
+    "**/.yarn/**",
+    "**/.pnp.*",
+    "**/.npm/**",
+    "**/.pnpm-store/**",
+
+    # --- Python ---
+    "**/__pycache__/**",
+    "**/.venv/**",
+    "**/venv/**",
+    "**/env/**",
+    "**/.env/**",
+    "**/.tox/**",
+    "**/.nox/**",
+    "**/.mypy_cache/**",
+    "**/.pytest_cache/**",
+    "**/.ruff_cache/**",
+    "**/.pytype/**",
+    "**/.pyre/**",
+    "**/.ipynb_checkpoints/**",
+    "**/*.egg-info/**",
+    "**/*.egg",
+    "**/*.pyc",
+    "**/*.pyo",
+    "**/*.pyd",
+    "**/pip-wheel-metadata/**",
+    "**/htmlcov/**",
+    "**/.coverage",
+    "**/.coverage.*",
+
+    # Generated assets / minified / source maps / binaries
     "**/*.min.js",
     "**/*.min.css",
     "**/*.map",
+    "**/*.so",
+    "**/*.dll",
+    "**/*.dylib",
+    "**/*.exe",
+
     # Lock files (machine-generated, rarely useful for semantic search)
     "**/*.lock",
     "**/*-lock.json",
+    "**/package-lock.json",
     "**/pnpm-lock.yaml",
+    "**/yarn.lock",
     "**/bun.lockb",
+    "**/composer.lock",
+    "**/Pipfile.lock",
+    "**/poetry.lock",
+    "**/uv.lock",
+
+    # Logs, OS junk, temp
+    "**/*.log",
+    "**/logs/**",
+    "**/tmp/**",
+    "**/.tmp/**",
+    "**/.DS_Store",
+    "**/Thumbs.db",
+
     # Project-specific bulk artefacts seen in real codebases
     "**/qdrant_storage/**",   # Qdrant data dir accidentally inside a source repo
 ]
