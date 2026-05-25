@@ -244,6 +244,55 @@ def code_to_embedding(
     )
 
 
+def _load_gitignore_patterns(root: str) -> list[str]:
+    """Parse .gitignore in `root` and return equivalent glob patterns.
+
+    gitignore rules converted:
+    - blank lines and comments (#) are skipped
+    - negation patterns (!) are skipped (we only exclude, never re-include)
+    - patterns starting with / are root-anchored (strip the leading /)
+    - patterns ending with / match directories (append **)
+    - patterns without any / match anywhere in the tree (prefix with **/)
+    """
+    gitignore_path = os.path.join(root, ".gitignore")
+    if not os.path.isfile(gitignore_path):
+        return []
+
+    patterns: list[str] = []
+    try:
+        with open(gitignore_path, encoding="utf-8", errors="replace") as fh:
+            for raw in fh:
+                line = raw.rstrip("\n\r")
+                # strip trailing spaces that are not escaped
+                line = line.rstrip(" ")
+                if not line or line.startswith("#") or line.startswith("!"):
+                    continue
+
+                anchored = line.startswith("/")
+                if anchored:
+                    line = line[1:]
+
+                dir_only = line.endswith("/")
+                if dir_only:
+                    line = line.rstrip("/")
+
+                # Decide whether the pattern needs a **/ prefix so it matches
+                # anywhere in the tree. Patterns that already contain / are
+                # relative to the repo root and need no prefix.
+                has_slash = "/" in line
+                if has_slash or anchored:
+                    prefix = ""
+                else:
+                    prefix = "**/"
+
+                suffix = "/**" if dir_only else ""
+                patterns.append(f"{prefix}{line}{suffix}")
+    except OSError as exc:
+        print(f"[indexer] WARNING: could not read .gitignore: {exc}", file=sys.stderr)
+
+    return patterns
+
+
 def _scan_unreadable(root: str) -> list[str]:
     """Walk `root` and return relpaths of files/dirs the current user can't read.
 
@@ -297,7 +346,8 @@ def _confirm_continue(unreadable: list[str]) -> None:
 def code_index_flow(flow_builder: cocoindex.FlowBuilder, data_scope: cocoindex.DataScope):
     unreadable = _scan_unreadable(CODEBASE_PATH)
     _confirm_continue(unreadable)
-    excluded = list(EXCLUDED_PATTERNS) + unreadable
+    gitignore = _load_gitignore_patterns(CODEBASE_PATH)
+    excluded = list(EXCLUDED_PATTERNS) + gitignore + unreadable
 
     data_scope["files"] = flow_builder.add_source(
         cocoindex.sources.LocalFile(
