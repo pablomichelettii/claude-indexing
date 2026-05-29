@@ -1,6 +1,6 @@
 [project]
 name = "claude-indexer"
-version = "0.1.1"
+version = "0.1.2"
 description = "Semantic codebase indexing for Claude Code via CocoIndex + Qdrant + MCP"
 requires-python = ">=3.11"
 dependencies = [
