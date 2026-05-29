@@ -446,9 +446,11 @@ def _install_skill(project_path: Path, mcp_name: str, force: bool = False) -> No
         "${mcp-find-tool}": f"mcp__{mcp_name}__qdrant-find",
     }
     for template in SKILLS_TEMPLATE_DIR.glob("*.md"):
-        target = target_dir / template.name
+        skill_dir = target_dir / template.stem
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        target = skill_dir / "SKILL.md"
         if target.exists() and not force:
-            print(f"→ skill '{template.name}' already exists at {target} — skipping")
+            print(f"→ skill '{template.stem}' already exists at {target} — skipping")
             continue
         content = template.read_text()
         for placeholder, value in replacements.items():
